@@ -1,0 +1,30 @@
+FORM create_fieldcatalog1 CHANGING ct_fieldcatalog TYPE lvc_t_fcat.
+
+
+
+  DATA: ls_fcat TYPE lvc_s_fcat.
+
+  CLEAR ct_fieldcatalog.
+
+  " Define macro for field catalog creation
+  DEFINE add_field.
+    CLEAR ls_fcat.
+    ls_fcat-fieldname = &1.
+    ls_fcat-scrtext_l = &2.
+    ls_fcat-outputlen = &3.
+    ls_fcat-tabname   = 'ZTRANS_DATA_LF'.
+    ls_fcat-no_zero   = &4.
+    ls_fcat-decimals_o = &5.
+    APPEND ls_fcat TO ct_fieldcatalog.
+  END-OF-DEFINITION.
+
+  add_field 'ID_KEY'               TEXT-019                   10 'X' 0.
+  add_field 'PLANT'                TEXT-002                     4  '' 0.
+  add_field 'PACKING_STATION'      TEXT-003                    10 '' 0.
+  add_field 'MATNR'                TEXT-004                    15 'X' 0.
+  add_field 'MATERIAL_DESCRIPTION' TEXT-005                  32 '' 0.
+  add_field 'MTART'                TEXT-011                    4  '' 0.
+  add_field 'MATERIAL_MOVEMENT'    TEXT-010                    6  '' 0.
+  add_field 'QUANTITY'             TEXT-024                    3  '' 0.
+  add_field 'UOM'                  TEXT-022                    3  '' 0.
+ENDFORM.
