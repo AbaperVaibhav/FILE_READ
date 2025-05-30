@@ -1,0 +1,58 @@
+FORM display_alv1 USING lo_alv TYPE REF TO cl_gui_alv_grid.
+
+  CLEAR: lt_data.
+  FREE ct_fieldcatalog.
+
+  SELECT id_key plant packing_station matnr mtart material_movement quantity uom material_description
+  FROM ztrans_data_lf INTO CORRESPONDING FIELDS OF TABLE lt_data
+  WHERE completed = 'N'
+  AND plant = p_plant
+  AND packing_station = p_pac_st.
+  " Create field catalog for ALV output
+*  CLEAR ct_fieldcatalog.
+  PERFORM create_fieldcatalog1 CHANGING ct_fieldcatalog.
+
+  IF lo_grid IS NOT INITIAL.
+    lo_grid->free( ).
+    CLEAR lo_grid.
+  ENDIF.
+
+  IF lo_container IS NOT INITIAL.
+    lo_container->free( ).
+    CLEAR lo_container.
+  ENDIF.
+
+*IF gv_alv_created = abap_false.
+  CREATE OBJECT lo_container
+    EXPORTING
+      container_name = 'ZROUTETRACK'.
+
+  CREATE OBJECT lo_grid
+    EXPORTING
+      i_parent = lo_container.
+
+  gs_variant-report = sy-repid.
+
+  TRY.
+      lo_grid->set_table_for_first_display(
+       EXPORTING
+                  is_variant  = gs_variant
+                  i_save      = 'A'  " 'A' for user-specific and global, 'U' for user-specific
+                  i_default   = 'X'  " Allow default layout
+                  is_layout         = VALUE lvc_s_layo( grid_title = TEXT-041
+                                                        no_toolbar = ' ' )  " Ensures toolbar is ON
+        CHANGING
+          it_outtab        = lt_data
+          it_fieldcatalog  = ct_fieldcatalog
+      ).
+
+      CALL METHOD lo_grid->refresh_table_display
+        EXPORTING
+          is_stable = VALUE lvc_s_stbl( row = 'X' col = 'X' ).
+
+    CATCH cx_salv_msg INTO DATA(lv_error).
+
+      WRITE: / TEXT-015 , lv_error->get_text( ).
+  ENDTRY.
+
+ENDFORM.
