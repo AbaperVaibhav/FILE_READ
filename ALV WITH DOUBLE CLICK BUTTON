@@ -1,0 +1,138 @@
+CLASS lcl_event_handler DEFINITION.
+  PUBLIC SECTION.
+    METHODS: handle_double_click FOR EVENT double_click OF cl_gui_alv_grid
+      IMPORTING e_row e_column es_row_no.
+ENDCLASS.
+
+CLASS lcl_event_handler IMPLEMENTATION.
+  METHOD handle_double_click.
+
+
+    " Get the data from the clicked row
+    READ TABLE lt_data INTO ls_row_data INDEX es_row_no-row_id.
+    IF sy-subrc = 0.
+      "Pass data to screen 200 and call the popup
+      lv_matnr = ls_row_data-matnr.
+      lv_quantity = ls_row_data-quantity.
+      lv_sloc_src  = ls_row_data-sloc_src .
+      lv_sloc_tgt  = ls_row_data-sloc_tgt.
+      lv_plant = ls_row_data-plant.
+      lv_uom = ls_row_data-uom.
+      lv_mtart = ls_row_data-mtart.
+      lv_material_description = ls_row_data-material_description.
+      lv_packing_station = ls_row_data-packing_station.
+      CALL SCREEN 200 STARTING AT 10 5 ENDING AT 95 14.
+      CALL SCREEN 1000.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+DATA: lo_event_handler TYPE REF TO lcl_event_handler.
+
+FORM display_alv1 USING lo_alv TYPE REF TO cl_gui_alv_grid.
+  p_mtart = mara-mtart.
+  CLEAR: lt_data, ct_fieldcatalog.
+
+  " Fetch data
+  SELECT
+mandt,
+id_key,
+plant,
+packing_station,
+sloc_src,
+sloc_tgt,
+matnr,
+mtart,
+mb_erfmg_r,
+mb_erfmg_c,
+uom,
+completed,
+aedat,
+aezet,
+createdbyuser,
+lastchangedbyuser,
+matdoc,
+material_movement,
+quantity,
+material_description
+
+    FROM ztrans_data_lf
+    INTO CORRESPONDING FIELDS OF TABLE @lt_data
+    WHERE completed = 'N'
+    AND plant = @p_plant
+    AND mtart = @p_mtart.
+
+  " Create field catalog
+  PERFORM create_fieldcatalog1 CHANGING ct_fieldcatalog.
+
+  IF lo_grid IS NOT INITIAL.
+    lo_grid->free( ).
+    CLEAR lo_grid.
+  ENDIF.
+
+  IF lo_container IS NOT INITIAL.
+    lo_container->free( ).
+    CLEAR lo_container.
+  ENDIF.
+
+  " Create container and grid
+  CREATE OBJECT lo_container
+    EXPORTING
+      container_name = 'ZROUTETRACK'
+    EXCEPTIONS
+      OTHERS         = 1.
+  IF sy-subrc <> 0.
+    MESSAGE TEXT-041 TYPE 'E'.
+    RETURN.
+  ENDIF.
+
+  CREATE OBJECT lo_grid
+    EXPORTING
+      i_parent = lo_container
+    EXCEPTIONS
+      OTHERS   = 1.
+  IF sy-subrc <> 0.
+    MESSAGE TEXT-041 TYPE 'E'.
+    RETURN.
+  ENDIF.
+
+  " Create and set event handler
+  CREATE OBJECT lo_event_handler.
+  SET HANDLER lo_event_handler->handle_double_click FOR lo_grid.
+
+  gs_variant-report = sy-repid.
+
+  TRY.
+      " Set table for first display
+      lo_grid->set_table_for_first_display(
+        EXPORTING
+          is_variant    = gs_variant
+          i_save        = 'A'
+          i_default     = 'X'
+          is_layout     = VALUE lvc_s_layo( grid_title = TEXT-049
+                                           no_toolbar = ' '
+                                           sel_mode = 'A' )  " Enable row selection
+        CHANGING
+          it_outtab     = lt_data
+          it_fieldcatalog = ct_fieldcatalog
+        EXCEPTIONS
+          OTHERS = 1 ).
+      IF sy-subrc <> 0.
+        MESSAGE TEXT-041 TYPE 'E'.
+        RETURN.
+      ENDIF.
+
+*      " Refresh table display
+      lo_grid->refresh_table_display(
+        EXPORTING
+          is_stable = VALUE lvc_s_stbl( row = 'X' col = 'X' )
+        EXCEPTIONS
+          OTHERS = 1 ).
+      IF sy-subrc <> 0.
+        MESSAGE TEXT-041 TYPE 'E'.
+        RETURN.
+      ENDIF.
+
+    CATCH cx_salv_msg INTO DATA(lv_error).
+      MESSAGE lv_error->get_text( ) TYPE 'E'.
+  ENDTRY.
