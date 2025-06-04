@@ -1,9 +1,4 @@
-*&---------------------------------------------------------------------*
-*& Report ZZZZZ1
-*&---------------------------------------------------------------------*
-*&
-*&---------------------------------------------------------------------*
-REPORT ZZZZZ1.
+REPORT zzzzz1.
 
 * Type definitions for Excel data
 TYPES: BEGIN OF ty_excel,
@@ -24,6 +19,7 @@ TYPES: BEGIN OF ty_excel,
          ktext_component      TYPE ktext,                  " Component Description
          rgekz                TYPE rgekz,                  " Backflush Indicator
          datuv                TYPE datuv,                  " Valid From Date
+         stlan_hdr            TYPE stlan,
        END OF ty_excel.
 
 * Type for error logging
@@ -48,13 +44,22 @@ DATA: lt_excel                  TYPE TABLE OF ty_excel,
       ls_materialtaskallocation TYPE bapi1012_mtk_c,
       lt_operations             TYPE TABLE OF bapi1012_opr_c,
       ls_operations             TYPE bapi1012_opr_c,
+      ls_SEQUENCE               TYPE bapi1012_seq_c,
+      lT_SEQUENCE               TYPE TABLE OF bapi1012_seq_c,
       lt_components             TYPE TABLE OF bapi1012_com_c,
+      lt_textallocation         TYPE TABLE OF bapi1012_txt_hdr_c,
+      lS_textallocation         TYPE bapi1012_txt_hdr_c,
       ls_components             TYPE bapi1012_com_c,
       lt_return                 TYPE TABLE OF bapiret2,
-      ls_return                 TYPE bapiret2.
+      ls_return                 TYPE bapiret2,
+      lV_TESTRUN                TYPE bapiflag,
+      lv_date                   TYPE char10.
 
-* Selection screen
+
+"* Selection screen
 PARAMETERS: p_file TYPE rlgrap-filename OBLIGATORY.
+
+* F4 help for file selection
 AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
   CALL FUNCTION 'F4_FILENAME'
     EXPORTING
@@ -73,7 +78,7 @@ START-OF-SELECTION.
       filename                = lv_file
       i_begin_row             = 2
       i_begin_col             = 1
-      i_end_row               = 59
+      i_end_row               = 309
       i_end_col               = 18
     TABLES
       intern                  = lt_intern
@@ -82,21 +87,27 @@ START-OF-SELECTION.
       upload_ole              = 2
       OTHERS                  = 3.
   IF sy-subrc <> 0.
-    MESSAGE 'Error reading XLSX file' TYPE 'E'.
+    ls_log-row = 0.
+    ls_log-message = |Error reading XLSX file: { lv_file }|.
+    APPEND ls_log TO lt_log.
+    PERFORM display_log.
     RETURN.
   ENDIF.
 
-* Map internal table to lt_excel
-  CLEAR lt_excel.
-  DATA: lv_current_row TYPE i VALUE 0.
+  DATA: lv_row TYPE i.
+
+  CLEAR: lt_excel, ls_excel, lv_row.
+
+* Build internal table from Excel data
   LOOP AT lt_intern INTO ls_intern.
-    IF ls_intern-row <> lv_current_row.  " New row
+    IF lv_row IS INITIAL OR ls_intern-row <> lv_row.
       IF ls_excel IS NOT INITIAL.
         APPEND ls_excel TO lt_excel.
         CLEAR ls_excel.
       ENDIF.
-      lv_current_row = ls_intern-row.
+      lv_row = ls_intern-row.
     ENDIF.
+
     CASE ls_intern-col.
       WHEN 1.  ls_excel-plnnr                = ls_intern-value.
       WHEN 2.  ls_excel-plnal                = ls_intern-value.
@@ -115,151 +126,9 @@ START-OF-SELECTION.
       WHEN 15. ls_excel-ktext_component      = ls_intern-value.
       WHEN 16. ls_excel-rgekz                = ls_intern-value.
       WHEN 17. ls_excel-datuv                = ls_intern-value.
+      WHEN 18. ls_excel-stlan_hdr            = ls_intern-value.
     ENDCASE.
-*  ENDLOOP.
+  ENDLOOP.
   IF ls_excel IS NOT INITIAL.
-    APPEND ls_excel TO lt_excel.  " Append last row
-  ENDIF.
-
-* Process Excel data
-*  LOOP AT lt_excel INTO ls_excel.
-    CLEAR: ls_task, ls_materialtaskallocation, ls_operations, ls_components, lt_return.
-
-* Validate mandatory fields
-    IF ls_excel-plnnr IS INITIAL OR ls_excel-matnr_root IS INITIAL OR ls_excel-werks_root IS INITIAL.
-      ls_log-row = sy-tabix + 1.
-      ls_log-message = |Missing mandatory fields for PLNNR={ ls_excel-plnnr }|.
-      APPEND ls_log TO lt_log.
-      CONTINUE.
-    ENDIF.
-
-* Prepare task data (PLKO)
-    ls_task-task_list_group = 'N'.                     " Routing
-    ls_task-task_list_usage = ls_excel-bom_type.     " BOM Usage (e.g., 'M')
-    ls_task-plant = ls_excel-werks_root.             " WERKS_ROOT (e.g., 'RDZA')
-    ls_task-task_list_status = '4'.                  " Released
-    IF ls_excel-datuv IS NOT INITIAL.
-      ls_task-valid_from = ls_excel-datuv.           " DATUV
-    ELSE.
-      ls_task-valid_from = sy-datum.                 " System date
-    ENDIF.
-    ls_task-task_list_group = ls_excel-plnnr.        " PLNNR (e.g., '40000100')
-    ls_task-group_counter = ls_excel-plnal.          " PLNAL (e.g., '01')
-    APPEND ls_task TO lt_task.
-
-* Prepare material task allocation
-    ls_materialtaskallocation-material = ls_excel-matnr_root.  " MATNR_ROOT (e.g., 'E72-FH03')
-    ls_materialtaskallocation-plant = ls_excel-werks_root.     " WERKS_ROOT (e.g., 'RDZA')
-    IF ls_excel-datuv IS NOT INITIAL.
-      ls_materialtaskallocation-valid_from = ls_excel-datuv.   " DATUV
-    ELSE.
-      ls_materialtaskallocation-valid_from = sy-datum.         " System date
-    ENDIF.
-*    ls_materialtaskallocation-bom_usage = ls_excel-bom_type.   " BOM Usage (e.g., 'M')
-    APPEND ls_materialtaskallocation TO lt_materialtaskallocation.
-
-* Prepare operation data (PLPO)
-    ls_operations-activity = ls_excel-vornr.          " VORNR (e.g., '0020')
-    ls_operations-plant = ls_excel-werks_root.        " WERKS_ROOT (e.g., 'RDZA')
-    ls_operations-control_key = 'PP01'.               " Standard production
-    IF ls_excel-datuv IS NOT INITIAL.
-      ls_operations-valid_from = ls_excel-datuv.      " DATUV
-    ELSE.
-      ls_operations-valid_from = sy-datum.            " System date
-    ENDIF.
-    APPEND ls_operations TO lt_operations.
-
-* Prepare component data (PLMZ)
-    ls_components-bom_type = ls_excel-bom_type.       " BOM Category (e.g., 'M')
-    ls_components-material = ls_excel-idnrk.          " Component (e.g., '90332-FK1')
-    ls_components-item_no = ls_excel-posnr.           " BOM Item Number (e.g., '0020')
-    ls_components-item_id = ls_excel-itmid.           " Item ID (e.g., 'A0000002')
-    ls_components-backflush = ls_excel-rgekz.         " Backflush (e.g., 'X')
-    ls_components-plant = ls_excel-werks_root.        " Plant (e.g., 'RDZA')
-    IF ls_excel-datuv IS NOT INITIAL.
-      ls_components-valid_from = ls_excel-datuv.      " DATUV
-    ELSE.
-      ls_components-valid_from = sy-datum.            " System date
-    ENDIF.
-    ls_components-alternative_bom = ls_excel-alternative_bom_root.  " Alternative BOM (e.g., '01')
-    APPEND ls_components TO lt_components.
- ENDLOOP.
-
-* Call BAPI to create/update routing
-CALL FUNCTION 'ROUTING_MAINTAIN'
-* EXPORTING
-*   CHANGE_NO                          =
-*   KEY_DATE                           =
-*   TASK_LIST_GROUP                    =
-*   GROUP_COUNTER                      =
-*   MATERIAL                           =
-*   PLANT                              =
-*   TASK                               =
-*   TASK_X                             =
-*   APPLICATION                        =
-*   BOM_USAGE                          =
-  TABLES
-*   MATERIAL_TASK_ALLOCATIONS          =
-*   MATERIAL_TASK_ALLOCATIONS_X        =
-*   SEQUENCES                          =
-*   SEQUENCES_X                        =
-*   OPERATIONS                         =
-*   OPERATIONS_X                       =
-*   SUBOPERATIONS                      =
-*   SUBOPERATIONS_X                    =
-*   PRODUCTION_RESOURCES_TOOLS         =
-*   PRODUCTION_RESOURCES_TOOLS_X       =
-*   COMPONENT_ALLOCATIONS              =
-*   COMPONENT_ALLOCATIONS_X            =
-*   INSPECTION_CHARACTERISTICS         =
-*   INSPECTION_CHARACTERISTICS_X       =
-*   INSPECTION_VALUES                  =
-*   INSPECTION_VALUES_X                =
-*   REFERENCED_OPERATIONS              =
-*   TEXT                               =
-*   TEXT_ALLOCATIONS                   =
-    return                             =
-   SEGMENT_TASK_MAINTAIN              = lt_return
-          .
-
-    CALL FUNCTION 'BAPI_ROUTING_CREATE'
-      EXPORTING
-        testrun                  = ''  " Empty for update mode
-        profile                  = 'SAP1'  " Standard profile
-        bomusage                 = '1'     " Production
-        application              = 'PP01'  " Production planning
-      IMPORTING
-        group                    = lv_group
-        groupcounter             = lv_groupcounter
-      TABLES
-        task                     = lt_task
-        materialtaskallocation   = lt_materialtaskallocation
-        operation                = lt_operations
-        componentallocation      = lt_components
-        return                   = lt_return.
-
-* Check BAPI return messages
-    READ TABLE lt_return INTO ls_return WITH KEY type = 'E'.
-    IF sy-subrc = 0.
-      ls_log-row = sy-tabix + 1.
-      ls_log-message = |BAPI error for PLNNR={ ls_excel-plnnr }: { ls_return-message }|.
-      APPEND ls_log TO lt_log.
-      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-    ELSE.
-* Commit changes
-      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
-        EXPORTING
-          wait = 'X'.
-    ENDIF.
-
-* Clear tables for next iteration
-    CLEAR: lt_task, lt_materialtaskallocation, lt_operations, lt_components.
-
-* Display log
-  IF lt_log IS INITIAL.
-    MESSAGE 'All records processed successfully' TYPE 'S'.
-  ELSE.
-    LOOP AT lt_log INTO ls_log.
-      WRITE: / ls_log-row, ls_log-message.
-    ENDLOOP.
+    APPEND ls_excel TO lt_excel.
   ENDIF.
